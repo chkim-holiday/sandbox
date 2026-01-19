@@ -28,9 +28,9 @@ static const uint8_t crc8_table[256] = {
     0x82, 0xB3, 0xE0, 0xD1, 0x46, 0x77, 0x24, 0x15, 0x3B, 0x0A, 0x59, 0x68,
     0xFF, 0xCE, 0x9D, 0xAC};
 
-uint8_t ComputeCRC8(const uint8_t* data, const int len) {
+uint8_t ComputeCRC8(const uint8_t* data, size_t len) {
   uint8_t crc = 0x00;  // Initial value
-  for (int i = 0; i < len; ++i) crc = crc8_table[crc ^ data[i]];
+  for (size_t i = 0; i < len; ++i) crc = crc8_table[crc ^ data[i]];
   return crc;
 }
 

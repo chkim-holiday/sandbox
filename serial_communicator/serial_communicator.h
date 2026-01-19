@@ -184,6 +184,12 @@ void SerialCommunicator::RunReadThread() {
     if (poll_result > 0 && (pfd.revents & POLLIN)) {
       // 데이터 수신 가능
       ssize_t n = ::read(serial_port_.fd, buffer, kBufferSize);
+      std::cerr << "Data: ";
+      for (ssize_t i = 0; i < n; ++i) {
+        // std::cerr << std::hex << static_cast<int>(buffer[i]) << " ";
+        std::cerr << static_cast<char>(buffer[i]) << "";
+      }
+      std::cerr << std::dec << std::endl;
 
       if (n > 0) {
         // 콜백은 초기화 후 변경되지 않으므로 lock 불필요

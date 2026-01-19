@@ -1,0 +1,32 @@
+cmake_minimum_required(VERSION 3.10)
+project(serial_communicator)
+
+# C++ 표준 설정
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# 컴파일 옵션
+add_compile_options(-Wall -Wextra)
+
+# CRC8 소스 파일 생성 (헤더 전용이 아닌 경우)
+add_library(crc8_lib INTERFACE)
+target_include_directories(crc8_lib INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+
+# 실행 파일 생성
+add_executable(serial_comm_example
+    main.cc
+    crc8_table.h
+    packet_parser.h
+    serial_communicator.h
+)
+
+# pthread 링크 (Linux)
+find_package(Threads REQUIRED)
+target_link_libraries(serial_comm_example 
+    PRIVATE 
+    Threads::Threads
+    crc8_lib
+)
+
+# 설치 규칙 (선택사항)
+install(TARGETS serial_comm_example DESTINATION bin)
