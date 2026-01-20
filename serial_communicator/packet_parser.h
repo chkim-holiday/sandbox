@@ -13,6 +13,8 @@ class PacketParser {
  public:
   using PacketCallback = std::function<void(const Packet& packet)>;
 
+  PacketParser() { Reset(); }
+
   void AppendRawData(const uint8_t* data, size_t len) {
     for (size_t i = 0; i < len; i++) ProcessByte(data[i]);
   }
@@ -22,7 +24,7 @@ class PacketParser {
   }
 
  private:
-  enum class ProcessState {
+  enum class ProcessState : uint8_t {
     kWaitHeader1,     // 헤더 1 대기
     kWaitHeader2,     // 헤더 2 대기
     kWaitTimestamp,   // Timestamp 대기 (8바이트)
@@ -130,7 +132,7 @@ class PacketParser {
 
   PacketCallback packet_callback_;
 
-  ProcessState state_;
+  ProcessState state_{ProcessState::kWaitHeader1};
   uint8_t packet_buffer_[512];
   size_t buffer_index_{0};
   size_t data_received_{0};
