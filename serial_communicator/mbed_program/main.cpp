@@ -1,20 +1,23 @@
-// main.cpp - Mbed Studio용 PTP-like Serial Protocol
+// main.cpp - Mbed Studio용 PTP-like Serial Protocol (0xAA 0x55 헤더)
 
 #include "mbed.h"
 
 // ========== 패킷 정의 ==========
-#define PKT_HEADER 0x7E
+#define PKT_HEADER_1 0xAA
+#define PKT_HEADER_2 0x55
 
 enum MessageType {
-  MSG_ECHO = 0x00,
-  PTP_SYNC = 0x01,
-  PTP_DELAY_REQ = 0x02,
-  PTP_DELAY_RESP = 0x03,
-  IMU_DATA = 0x10,
+  ECHO_MSG = 0x01,
+  HEART_BEAT_MSG = 0x02,
+  PTP_SYNC = 0x10,
+  PTP_DELAY_REQ = 0x11,
+  PTP_DELAY_RESP = 0x12,
+  IMU_DATA = 0x20,
 };
 
 struct __attribute__((packed)) Packet {
-  uint8_t header;      // 0x7E
+  uint8_t header1;     // 0xAA
+  uint8_t header2;     // 0x55
   uint64_t timestamp;  // 나노초
   uint8_t id;          // MessageType
   uint8_t seq;         // 시퀀스 번호
@@ -46,15 +49,16 @@ static const uint8_t crc8_table[256] = {
     0x82, 0xB3, 0xE0, 0xD1, 0x46, 0x77, 0x24, 0x15, 0x3B, 0x0A, 0x59, 0x68,
     0xFF, 0xCE, 0x9D, 0xAC};
 
-uint8_t crc8(const uint8_t* data, size_t len) {
-  uint8_t crc = 0x00;
+uint8_t ComputeCRC8(const uint8_t* data, size_t len) {
+  uint8_t crc = 0;
   for (size_t i = 0; i < len; i++) crc = crc8_table[crc ^ data[i]];
   return crc;
 }
 
 // ========== RX 상태 머신 ==========
 enum RxState {
-  WAIT_HEADER,
+  WAIT_HEADER1,
+  WAIT_HEADER2,
   WAIT_TIMESTAMP,
   WAIT_ID,
   WAIT_SEQ,
@@ -66,111 +70,126 @@ enum RxState {
 class PacketParser {
  private:
   RxState state;
-  uint8_t rx_buffer[268];
-  size_t rx_index;
+  uint8_t rx_buffer[269];
+  size_t rx_index_;
 
  public:
-  Packet current_packet;
-  uint8_t packet_data[255];
-  bool packet_ready;
-  uint64_t header_timestamp;
+  Packet current_packet_;
+  uint8_t packet_data_[255];
+  bool packet_ready_;
+  uint64_t header_timestamp_;
 
-  PacketParser() { reset(); }
+  PacketParser() { Reset(); }
 
-  void reset() {
-    state = WAIT_HEADER;
-    rx_index = 0;
-    packet_ready = false;
+  void Reset() {
+    state = WAIT_HEADER1;
+    rx_index_ = 0;
+    packet_ready_ = false;
   }
 
-  void feed(uint8_t byte, uint64_t timestamp) {
+  void FeedByte(uint8_t byte, uint64_t timestamp) {
     switch (state) {
-      case WAIT_HEADER:
-        if (byte == PKT_HEADER) {
-          header_timestamp = timestamp;
+      case WAIT_HEADER1:
+        if (byte == PKT_HEADER_1) {
+          header_timestamp_ = timestamp;
           rx_buffer[0] = byte;
-          rx_index = 1;
-          state = WAIT_TIMESTAMP;
-          printf("[PARSER] Header found\n");
+          rx_index_ = 1;
+          state = WAIT_HEADER2;
+          //   printf("[PARSER] Header1 (0xAA) found\n");
         }
         break;
+
+      case WAIT_HEADER2:
+        if (byte == PKT_HEADER_2) {
+          rx_buffer[rx_index_++] = byte;
+          state = WAIT_TIMESTAMP;
+          //   printf("[PARSER] Header2 (0x55) found\n");
+        } else {
+          //   printf("[PARSER] Invalid Header2: 0x%02X, resetting\n", byte);
+          Reset();
+          if (byte == PKT_HEADER_1) {
+            header_timestamp_ = timestamp;
+            rx_buffer[0] = byte;
+            rx_index_ = 1;
+            state = WAIT_HEADER2;
+          }
+        }
+        break;
+
       case WAIT_TIMESTAMP:
-        rx_buffer[rx_index++] = byte;
-        if (rx_index >= 9) {  // header(1) + timestamp(8)
+        rx_buffer[rx_index_++] = byte;
+        if (rx_index_ >= 10) {
           state = WAIT_ID;
-          printf("[PARSER] Timestamp complete\n");
+          //   printf("[PARSER] Timestamp complete\n");
         }
         break;
 
       case WAIT_ID:
-        rx_buffer[rx_index++] = byte;
-        if (rx_index >= 10) {  // + id(1)
+        rx_buffer[rx_index_++] = byte;
+        if (rx_index_ >= 11) {
           state = WAIT_SEQ;
-          printf("[PARSER] ID=0x%02X\n", byte);
+          //   printf("[PARSER] ID=0x%02X\n", byte);
         }
         break;
 
       case WAIT_SEQ:
-        rx_buffer[rx_index++] = byte;
-        if (rx_index >= 11) {  // + seq(1)
+        rx_buffer[rx_index_++] = byte;
+        if (rx_index_ >= 12) {
           state = WAIT_LEN;
-          printf("[PARSER] SEQ=%d (byte=0x%02X, from rx_buffer[10]=0x%02X)\n",
-                 byte, byte, rx_buffer[10]);
+          //   printf("[PARSER] SEQ=%d\n", byte);
         }
         break;
-
       case WAIT_LEN:
-        rx_buffer[rx_index++] = byte;
-        // 헤더 파싱
-        memcpy(&current_packet.timestamp, rx_buffer + 1, 8);
-        current_packet.id = rx_buffer[9];
-        current_packet.seq = rx_buffer[10];
-        current_packet.len = byte;
-
-        printf("[PARSER] LEN=%d (byte=0x%02X), rx_index=%d\n", byte, byte,
-               rx_index);
-        printf("[PARSER] Parsed: ID=0x%02X, SEQ=%d, LEN=%d\n",
-               current_packet.id, current_packet.seq, current_packet.len);
-
-        if (current_packet.len == 0)
+        rx_buffer[rx_index_++] = byte;
+        memcpy(&current_packet_.timestamp, rx_buffer + 2, 8);
+        current_packet_.id = rx_buffer[10];
+        current_packet_.seq = rx_buffer[11];
+        current_packet_.len = byte;
+        // printf("[PARSER] LEN=%d, ID=0x%02X, SEQ=%d\n", byte,
+        // current_packet_.id,
+        //    current_packet_.seq);
+        if (current_packet_.len == 0)
           state = WAIT_CRC;
         else
           state = WAIT_DATA;
         break;
 
       case WAIT_DATA:
-        packet_data[rx_index - 12] = byte;
-        rx_buffer[rx_index++] = byte;
-        printf("[PARSER] DATA[%d]=0x%02X, rx_index=%d\n", rx_index - 13, byte,
-               rx_index);
-        if (rx_index >= 12 + current_packet.len) {
-          printf("[PARSER] Data complete, waiting CRC\n");
+        packet_data_[rx_index_ - 13] = byte;
+        rx_buffer[rx_index_++] = byte;
+        // printf("[PARSER] DATA[%zu]=0x%02X\n", rx_index_ - 14, byte);
+        if (rx_index_ >= 13 + current_packet_.len) {
+          //   printf("[PARSER] Data complete\n");
           state = WAIT_CRC;
         }
         break;
 
-      case WAIT_CRC:
-        rx_buffer[rx_index++] = byte;
-        uint8_t calc_crc = crc8(rx_buffer, rx_index - 1);
-        printf("[PARSER] CRC: calc=0x%02X, recv=0x%02X, rx_index=%d\n",
-               calc_crc, byte, rx_index);
+      case WAIT_CRC: {
+        rx_buffer[rx_index_++] = byte;
+        uint8_t calc_crc = ComputeCRC8(rx_buffer, rx_index_ - 1);
+        // printf("[PARSER] CRC: calc=0x%02X, recv=0x%02X\n", calc_crc, byte);
         if (calc_crc == byte) {
-          current_packet.timestamp = header_timestamp;  // 수신 시각으로 설정
-          packet_ready = true;
-          printf("[PKT] ID=0x%02X, seq=%d, len=%d, CRC OK\n", current_packet.id,
-                 current_packet.seq, current_packet.len);
+          current_packet_.timestamp = header_timestamp_;
+          packet_ready_ = true;
+          //   printf("Packet ready!");
+          //   printf("[PKT] ID=0x%02X, seq=%d, len=%d, CRC OK\n",
+          //          current_packet_.id, current_packet_.seq,
+          //          current_packet_.len);
+          rx_index_ = 0;
+          state = WAIT_HEADER1;
         } else {
-          printf("[PKT] CRC FAIL: calc=0x%02X, recv=0x%02X\n", calc_crc, byte);
+          //   printf("[PKT] CRC FAIL\n");
+          rx_index_ = 0;
+          state = WAIT_HEADER1;
         }
-        reset();
-        break;
+      } break;
     }
   }
 };
 
 // ========== 글로벌 변수 ==========
 DigitalOut led(LED1);
-UnbufferedSerial serial(USBTX, USBRX, 115200);
+UnbufferedSerial serial(USBTX, USBRX, 460800);
 Timer timer;
 PacketParser parser;
 uint8_t seq_counter = 0;
@@ -179,7 +198,8 @@ struct RxByte {
   uint8_t data;
   uint64_t timestamp;
 };
-Queue<RxByte, 512> rx_queue;
+
+Mail<RxByte, 512> rx_mail;
 
 uint64_t last_sync_t1 = 0;
 uint64_t last_sync_t2 = 0;
@@ -189,10 +209,12 @@ uint64_t path_delay = 0;
 
 // ========== 패킷 송신 ==========
 void SendPacket(uint8_t msg_id, const uint8_t* data, uint8_t data_len) {
-  uint8_t buffer[268];
+  uint8_t buffer[269];
   size_t offset = 0;
 
-  buffer[offset++] = PKT_HEADER;
+  buffer[offset++] = PKT_HEADER_1;
+  buffer[offset++] = PKT_HEADER_2;
+
   uint64_t tx_timestamp = timer.elapsed_time().count() * 1000ULL;
   memcpy(buffer + offset, &tx_timestamp, 8);
   offset += 8;
@@ -206,10 +228,11 @@ void SendPacket(uint8_t msg_id, const uint8_t* data, uint8_t data_len) {
     offset += data_len;
   }
 
-  uint8_t crc = crc8(buffer, offset);
+  uint8_t crc = ComputeCRC8(buffer, offset);
   buffer[offset++] = crc;
 
-  for (size_t i = 0; i < offset; i++) serial.write(&buffer[i], 1);
+  serial.write(buffer, offset);
+  //   printf("[TX] Sent %zu bytes, ID=0x%02X, seq=%d\n", offset, msg_id, seq);
 }
 
 void SendSync() { SendPacket(PTP_SYNC, NULL, 0); }
@@ -228,12 +251,20 @@ void SendDelayResp(uint8_t req_seq, uint64_t t2) {
 
 // ========== RX 인터럽트 ==========
 void HandleRxInterrupt() {
-  uint64_t ts = timer.elapsed_time().count() * 1000ULL;
   while (serial.readable()) {
     uint8_t byte;
-    serial.read(&byte, 1);
-    RxByte rx_data = {byte, ts};
-    rx_queue.try_put(&rx_data);
+    if (serial.read(&byte, 1) == 1) {
+      uint64_t ts = timer.elapsed_time().count() * 1000ULL;
+
+      RxByte* mail = rx_mail.try_alloc();
+      if (mail) {
+        mail->data = byte;
+        mail->timestamp = ts;
+        rx_mail.put(mail);
+      } else {
+        printf("[ERROR] Mail alloc failed!\n");
+      }
+    }
   }
 }
 
@@ -241,21 +272,22 @@ void HandleRxInterrupt() {
 void HandleEcho(Packet* pkt) {
   led = !led;
   printf("ECHO received: len=%d\n", pkt->len);
-  SendPacket(MSG_ECHO, parser.packet_data, pkt->len);
+  SendPacket(ECHO_MSG, parser.packet_data_, pkt->len);
+  led = !led;
 }
 
 void HandleSync(Packet* pkt) {
   led = !led;
   last_sync_t1 = pkt->timestamp;
-  last_sync_t2 = parser.header_timestamp;
+  last_sync_t2 = parser.header_timestamp_;
   printf("\n[SYNC] T1=%llu, T2=%llu\n", last_sync_t1, last_sync_t2);
   SendDelayReq();
 }
 
 void HandleDelayResp(Packet* pkt) {
-  uint8_t req_seq = parser.packet_data[0];
+  uint8_t req_seq = parser.packet_data_[0];
   uint64_t t2_master, t4;
-  memcpy(&t2_master, parser.packet_data + 1, 8);
+  memcpy(&t2_master, parser.packet_data_ + 1, 8);
   t4 = pkt->timestamp;
 
   int64_t forward_delay = (int64_t)last_sync_t2 - (int64_t)last_sync_t1;
@@ -272,52 +304,47 @@ int main() {
   timer.start();
   serial.attach(callback(HandleRxInterrupt), SerialBase::RxIrq);
 
-  // 부팅 메시지
-  ThisThread::sleep_for(100ms);
+  ThisThread::sleep_for(200ms);
   printf("\n\n=================================\n");
   printf("PTP Protocol Started (Slave Mode)\n");
+  printf("Header: 0xAA 0x55\n");
   printf("=================================\n\n");
 
-  // 테스트: 즉시 ECHO 패킷 전송
-  ThisThread::sleep_for(500ms);
-  printf("Sending test ECHO packet...\n");
-  uint8_t test_data[] = "HELLO";
-  SendPacket(MSG_ECHO, test_data, 5);
-  printf("Test packet sent!\n");
+  ThisThread::sleep_for(200ms);
 
-  uint32_t loop_count = 0;
-
+  unsigned long loop_count = 0;
   while (1) {
-    // RX 큐 처리
-    RxByte* rx_ptr;
-    while (rx_queue.try_get(&rx_ptr)) {
-      parser.feed(rx_ptr->data, rx_ptr->timestamp);
+    osEvent evt = rx_mail.get(1);
 
-      if (parser.packet_ready) {
-        printf("[MAIN] Packet ready, processing...\n");
-        switch (parser.current_packet.id) {
-          case MSG_ECHO:
-            HandleEcho(&parser.current_packet);
+    if (evt.status == osEventMail) {
+      RxByte* rx_data = (RxByte*)evt.value.p;
+      parser.FeedByte(rx_data->data, rx_data->timestamp);
+      if (parser.packet_ready_) {
+        switch (parser.current_packet_.id) {
+          case ECHO_MSG:
+            HandleEcho(&parser.current_packet_);
             break;
           case PTP_SYNC:
-            HandleSync(&parser.current_packet);
+            HandleSync(&parser.current_packet_);
             break;
           case PTP_DELAY_RESP:
-            HandleDelayResp(&parser.current_packet);
+            HandleDelayResp(&parser.current_packet_);
             break;
           default:
-            printf("Unknown ID: 0x%02X\n", parser.current_packet.id);
+            printf("Unknown ID: 0x%02X\n", parser.current_packet_.id);
             break;
         }
-        parser.packet_ready = false;
+        parser.packet_ready_ = false;
       }
+
+      rx_mail.free(rx_data);
     }
 
-    // 10초마다 하트비트
     loop_count++;
-    if (loop_count % 10000 == 0) {
-      printf("[HEARTBEAT] Alive, loop=%lu\n", loop_count);
+    if (loop_count % 500 == 0) {
       led = !led;
+      //   printf("[HEARTBEAT] Alive, loop=%lu\n", loop_count);
+      SendPacket(HEART_BEAT_MSG, NULL, 0);
     }
 
     ThisThread::sleep_for(1ms);

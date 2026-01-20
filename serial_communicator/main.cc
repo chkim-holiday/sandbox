@@ -9,26 +9,26 @@
 
 using namespace serial_communicator;
 
-volatile bool g_running = true;
+volatile bool is_thread_running = true;
 
 // PTP Sync 관련 변수
 struct PTPState {
   uint8_t sync_seq = 0;
-  uint64_t t1 = 0;  // SYNC 전송 시각 (Local)
-  uint64_t t2 = 0;  // DELAY_REQ 수신 시각 (Remote가 보낸 값)
-  uint64_t t3 = 0;  // DELAY_REQ 전송 시각 (Local)
-  uint64_t t4 = 0;  // DELAY_RESP 전송 시각 (Remote가 보낸 값)
+  uint64_t t1 = 0;  // SYNC 전송 시각 (Host PC)
+  uint64_t t2 = 0;  // DELAY_REQ 수신 시각 (MCU가 보낸 값)
+  uint64_t t3 = 0;  // DELAY_REQ 전송 시각 (Host PC)
+  uint64_t t4 = 0;  // DELAY_RESP 전송 시각 (MCU가 보낸 값)
   int64_t offset_ns = 0;
   int64_t delay_ns = 0;
 };
 
 PTPState ptp_state;
-SerialCommunicator* g_comm = nullptr;
+SerialCommunicator* serial_comm = nullptr;
 
 void SignalHandler(int signal) {
   if (signal == SIGINT) {
     std::cout << "\nReceived SIGINT, shutting down..." << std::endl;
-    g_running = false;
+    is_thread_running = false;
   }
 }
 
@@ -39,8 +39,9 @@ void SendPacket(SerialCommunicator& comm, uint64_t timestamp_ns,
   uint8_t packet_buffer[512];
   size_t idx = 0;
 
-  // Header
-  packet_buffer[idx++] = PKT_HEADER;
+  // Header (2 bytes)
+  packet_buffer[idx++] = PKT_HEADER_1;
+  packet_buffer[idx++] = PKT_HEADER_2;
 
   // Timestamp (8 bytes, little-endian)
   std::memcpy(&packet_buffer[idx], &timestamp_ns, sizeof(timestamp_ns));
@@ -67,10 +68,12 @@ void SendPacket(SerialCommunicator& comm, uint64_t timestamp_ns,
 
   // 전송
   size_t written = comm.Write(packet_buffer, idx);
-  std::cout << "Sent packet: ID=0x" << std::hex << static_cast<int>(id)
-            << std::dec << ", seq=" << static_cast<int>(seq)
-            << ", len=" << static_cast<int>(length) << ", written=" << written
-            << " bytes" << std::endl;
+  // std::cout << "[Host] Sent packet: ID=0x" << std::hex <<
+  // static_cast<int>(id)
+  //           << std::dec << ", seq=" << static_cast<int>(seq)
+  //           << ", len=" << static_cast<int>(length) << ", written=" <<
+  //           written
+  //           << " bytes" << std::endl;
 }
 
 // PTP SYNC 전송
@@ -80,7 +83,6 @@ void SendSync(SerialCommunicator& comm) {
                      now.time_since_epoch())
                      .count();
 
-  std::cout << "\n>>> Sending SYNC (T1=" << ptp_state.t1 << ")" << std::endl;
   SendPacket(comm, ptp_state.t1, MessageType::kPTPSync, ptp_state.sync_seq++,
              nullptr, 0);
 }
@@ -119,7 +121,7 @@ int main(int argc, char* argv[]) {
 
   // Serial port 설정
   std::string port_name = "/dev/ttyACM0";  // 기본값
-  int baudrate = 115200;
+  int baudrate = 460800;
 
   if (argc >= 2) {
     port_name = argv[1];
@@ -135,7 +137,7 @@ int main(int argc, char* argv[]) {
   PacketParser parser;
 
   // PacketParser 콜백 설정
-  parser.SetPacketCallback([](const PacketParser::Packet& packet) {
+  auto packet_callback = [](const PacketParser::Packet& packet) {
     std::cout << "\n=== Received Packet ===" << std::endl;
     std::cout << "ID        : 0x" << std::hex << std::setw(2)
               << std::setfill('0') << static_cast<int>(packet.id) << std::dec
@@ -158,8 +160,8 @@ int main(int argc, char* argv[]) {
                 << ", T2(local)=" << t2 << std::endl;
 
       // DELAY_REQ 전송
-      if (g_comm) {
-        SendDelayReq(*g_comm, packet.seq);
+      if (serial_comm) {
+        SendDelayReq(*serial_comm, packet.seq);
       }
 
     } else if (packet.id == static_cast<uint8_t>(MessageType::kPTPDelayReq)) {
@@ -174,8 +176,8 @@ int main(int argc, char* argv[]) {
                 << std::endl;
 
       // DELAY_RESP 전송
-      if (g_comm) {
-        SendDelayResp(*g_comm, packet.seq, t2);
+      if (serial_comm) {
+        SendDelayResp(*serial_comm, packet.seq, t2);
       }
 
     } else if (packet.id == static_cast<uint8_t>(MessageType::kPTPDelayResp)) {
@@ -205,6 +207,17 @@ int main(int argc, char* argv[]) {
           std::cout << ">>> One-way delay: " << delay << " ns" << std::endl;
         }
       }
+    } else if (packet.id == static_cast<uint8_t>(MessageType::kDebugEchoMsg)) {
+      // ECHO 메시지 수신
+      std::cout << "<<< Received ECHO message: ";
+      for (int i = 0; i < packet.length; i++) {
+        std::cout << packet.data[i];
+      }
+      std::cout << std::endl;
+    } else if (packet.id ==
+               static_cast<uint8_t>(MessageType::kDebugHeartBeatMsg)) {
+      // HEARTBEAT 메시지 수신
+      std::cout << "<<< Received HEARTBEAT message." << std::endl;
     }
 
     // Raw Packet 출력
@@ -212,7 +225,8 @@ int main(int argc, char* argv[]) {
     std::cout << "  ";
 
     // Header
-    printf("%02X ", PKT_HEADER);
+    printf("%02X ", PKT_HEADER_1);
+    printf("%02X ", PKT_HEADER_2);
 
     // Timestamp (8 bytes)
     const uint8_t* ts_bytes =
@@ -223,14 +237,8 @@ int main(int argc, char* argv[]) {
 
     // ID
     printf("%02X ", packet.id);
-
-    // Seq
     printf("%02X ", packet.seq);
-
-    // Length
     printf("%02X ", packet.length);
-
-    // Data
     for (int i = 0; i < packet.length; i++) {
       // printf("%02X ", packet.data[i]);
       printf("%c ", packet.data[i]);
@@ -241,7 +249,8 @@ int main(int argc, char* argv[]) {
 
     std::cout << std::endl;
     std::cout << "=====================\n" << std::endl;
-  });
+  };
+  parser.SetPacketCallback(packet_callback);
 
   try {
     // SerialCommunicator 생성
@@ -256,7 +265,7 @@ int main(int argc, char* argv[]) {
           std::cerr << "Serial error: " << error << std::endl;
         });
 
-    g_comm = &comm;  // 전역 포인터 설정
+    serial_comm = &comm;  // 전역 포인터 설정
 
     std::cout << "Serial port opened successfully. Press Ctrl+C to exit."
               << std::endl;
@@ -264,18 +273,16 @@ int main(int argc, char* argv[]) {
 
     // PTP SYNC 전송 루프 (Master 역할)
     uint8_t test_seq = 0;
-    while (g_running) {
+    while (is_thread_running) {
       // 테스트 데이터 생성
       uint8_t test_data[] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE};
 
-      std::cout << "\n>>> Sending ECHO with seq=" << static_cast<int>(test_seq)
-                << ", len=5" << std::endl;
-
-      SendPacket(comm, 12345678ULL, MessageType::kEcho, test_seq++, test_data,
-                 5);
+      std::cout << "Send echo request..." << std::endl;
+      SendPacket(comm, 12345678ULL, MessageType::kDebugEchoMsg, test_seq++,
+                 test_data, 5);
 
       // 1초 대기
-      std::this_thread::sleep_for(std::chrono::seconds(1));
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 
   } catch (const std::exception& e) {

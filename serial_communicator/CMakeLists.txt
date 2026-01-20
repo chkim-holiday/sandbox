@@ -13,20 +13,12 @@ add_library(crc8_lib INTERFACE)
 target_include_directories(crc8_lib INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # 실행 파일 생성
-add_executable(serial_comm_example
-    main.cc
-    crc8_table.h
-    packet_parser.h
-    serial_communicator.h
-)
+add_executable(serial_comm_example main.cc crc8_table.h packet_parser.h
+                                   serial_communicator.h)
 
 # pthread 링크 (Linux)
 find_package(Threads REQUIRED)
-target_link_libraries(serial_comm_example 
-    PRIVATE 
-    Threads::Threads
-    crc8_lib
-)
+target_link_libraries(serial_comm_example PRIVATE Threads::Threads crc8_lib)
 
 # 설치 규칙 (선택사항)
 install(TARGETS serial_comm_example DESTINATION bin)

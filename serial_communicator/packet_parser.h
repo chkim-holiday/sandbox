@@ -6,17 +6,17 @@
 
 #include "crc8_table.h"
 
-#define PKT_HEADER 0x7E
+#define PKT_HEADER_1 0xAA
+#define PKT_HEADER_2 0x55
 
 enum class MessageType : uint8_t {
-  kEcho = 0x00,
-  kPTPSync = 0x01,
-  kPTPDelayReq = 0x02,
-  kPTPDelayResp = 0x03,
-  kIMUData = 0x10,
+  kDebugEchoMsg = 0x01,
+  kDebugHeartBeatMsg = 0x02,
+  kPTPSync = 0x10,
+  kPTPDelayReq = 0x11,
+  kPTPDelayResp = 0x12,
+  kIMUData = 0x20,
 };
-
-#define PKT_ID_IMU_DATA 0x10
 
 namespace serial_communicator {
 
@@ -53,37 +53,38 @@ class PacketParser {
   void ProcessByte(uint8_t byte) {
     switch (state_) {
       case ProcessState::WAIT_HEADER: {
-        if (byte == PKT_HEADER) {
-          packet_buffer_[0] = byte;
-          buffer_index_ = 1;
-          timestamp_bytes_received_ = 0;
-          state_ = ProcessState::WAIT_TIMESTAMP;
-          std::cerr << "Header detected" << std::endl;
+        packet_buffer_[buffer_index_++] = byte;
+        if (buffer_index_ == 2) {
+          if (packet_buffer_[0] == PKT_HEADER_1 &&
+              packet_buffer_[1] == PKT_HEADER_2) {
+            state_ = ProcessState::WAIT_TIMESTAMP;
+          } else {
+            Reset();
+          }
         }
       } break;
       case ProcessState::WAIT_TIMESTAMP: {
-        packet_buffer_[buffer_index_++] = byte;
+        packet_buffer_[buffer_index_] = byte;
+        ++buffer_index_;
         reinterpret_cast<uint8_t*>(
             &current_packet_.timestamp_ns)[timestamp_bytes_received_++] = byte;
-
-        if (timestamp_bytes_received_ >= 8) {
-          state_ = ProcessState::WAIT_ID;
-          std::cerr << "Timestamp received: " << current_packet_.timestamp_ns
-                    << std::endl;
-        }
+        if (timestamp_bytes_received_ >= 8) state_ = ProcessState::WAIT_ID;
       } break;
       case ProcessState::WAIT_ID: {
-        packet_buffer_[buffer_index_++] = byte;
+        packet_buffer_[buffer_index_] = byte;
+        ++buffer_index_;
         current_packet_.id = byte;
         state_ = ProcessState::WAIT_SEQ;
       } break;
       case ProcessState::WAIT_SEQ: {
-        packet_buffer_[buffer_index_++] = byte;
+        packet_buffer_[buffer_index_] = byte;
+        ++buffer_index_;
         current_packet_.seq = byte;
         state_ = ProcessState::WAIT_LEN;
       } break;
       case ProcessState::WAIT_LEN: {
-        packet_buffer_[buffer_index_++] = byte;
+        packet_buffer_[buffer_index_] = byte;
+        ++buffer_index_;
         current_packet_.length = byte;
         data_received_ = 0;
 
@@ -98,7 +99,8 @@ class PacketParser {
         }
       } break;
       case ProcessState::WAIT_DATA: {
-        packet_buffer_[buffer_index_++] = byte;
+        packet_buffer_[buffer_index_] = byte;
+        ++buffer_index_;
         current_packet_.data[data_received_++] = byte;
 
         if (data_received_ >= current_packet_.length)
@@ -108,12 +110,14 @@ class PacketParser {
         if (buffer_index_ >= sizeof(packet_buffer_) - 1) Reset();
       } break;
       case ProcessState::WAIT_CRC: {
-        packet_buffer_[buffer_index_++] = byte;
-
+        packet_buffer_[buffer_index_] = byte;
+        ++buffer_index_;
         // CRC 검증 (헤더부터 데이터까지, CRC 제외)
         uint8_t calculated_crc = ComputeCRC8(packet_buffer_, buffer_index_ - 1);
-        if (calculated_crc == byte && packet_callback_)
+        if (calculated_crc == byte && packet_callback_) {
+          std::cerr << "invoking packet callback." << std::endl;
           packet_callback_(current_packet_);  // 패킷 완성! 콜백 호출
+        }
         // CRC 실패해도 무시하고 다음 헤더 탐색
         Reset();
       } break;
