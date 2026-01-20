@@ -20,8 +20,8 @@
 namespace serial_communicator {
 
 struct SerialPort {
-  std::string port_name;
-  uint32_t baud_rate;
+  std::string port_name{""};
+  uint32_t baud_rate{115200};
   int fd{-1};
 };
 
@@ -30,10 +30,19 @@ class SerialCommunicator {
   using DataCallback = std::function<void(const uint8_t* data, size_t len)>;
   using ErrorCallback = std::function<void(const std::string& error)>;
 
-  SerialCommunicator(const std::string& port_name, int baudrate,
-                     DataCallback data_callback, ErrorCallback error_callback);
+  SerialCommunicator(const std::string& port_name, int baudrate);
 
   ~SerialCommunicator();
+
+  bool StartSerialCommunication();
+
+  void SetDataCallback(DataCallback data_callback) {
+    data_callback_ = data_callback;
+  }
+
+  void SetErrorCallback(ErrorCallback error_callback) {
+    error_callback_ = error_callback;
+  }
 
   size_t Write(const uint8_t* data, size_t len);
 
@@ -44,35 +53,43 @@ class SerialCommunicator {
 
   SerialPort serial_port_;
 
-  const DataCallback data_callback_;  // const로 변경 불가
-  const ErrorCallback error_callback_;
+  DataCallback data_callback_;  // const로 변경 불가
+  ErrorCallback error_callback_;
 
+  bool is_serial_communication_started_{false};
   std::atomic<bool> read_thread_activated_{true};
   std::mutex mutex_read_thread_;
   std::thread read_thread_;
 };
 
 SerialCommunicator::SerialCommunicator(const std::string& port_name,
-                                       int baudrate, DataCallback data_callback,
-                                       ErrorCallback error_callback)
-    : serial_port_{port_name, static_cast<uint32_t>(baudrate), -1},
-      data_callback_(data_callback),
-      error_callback_(error_callback) {
-  if (!OpenSerialPort(port_name, baudrate))
-    throw std::runtime_error("Failed to open serial port: " + port_name);
+                                       int baudrate)
+    : serial_port_{port_name, static_cast<uint32_t>(baudrate), -1} {}
 
-  if (data_callback_ == nullptr || error_callback_ == nullptr) {
-    throw std::runtime_error(
-        "Data callback and error callback must be set before starting read "
-        "thread.");
+bool SerialCommunicator::StartSerialCommunication() {
+  if (!data_callback_) {
+    std::cerr << "Data callback is not set. Cannot start serial communication."
+              << std::endl;
+    return false;
   }
+  if (!error_callback_) {
+    std::cerr << "Error callback is not set. Cannot start serial communication."
+              << std::endl;
+    return false;
+  }
+  if (!OpenSerialPort(serial_port_.port_name, serial_port_.baud_rate))
+    throw std::runtime_error("Failed to open serial port: " +
+                             serial_port_.port_name);
 
   // Start read thread
+  is_serial_communication_started_ = true;
   read_thread_activated_ = true;
   read_thread_ = std::thread(&SerialCommunicator::RunReadThread, this);
+  return true;
 }
 
 SerialCommunicator::~SerialCommunicator() {
+  if (!is_serial_communication_started_) return;
   read_thread_activated_ = false;
   if (read_thread_.joinable()) read_thread_.join();
   if (serial_port_.fd != -1) {
