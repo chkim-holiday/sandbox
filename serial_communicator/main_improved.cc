@@ -4,9 +4,12 @@
 #include "packet_parser.h"
 #include "serial_communicator.h"
 
+#define SERIAL_BAUDRATE 921600
+
 int main() {
   // SerialCommunicator 초기화
-  serial_communicator::SerialCommunicator serial_comm("/dev/ttyACM0", 460800);
+  serial_communicator::SerialCommunicator serial_comm("/dev/ttyACM0",
+                                                      SERIAL_BAUDRATE);
 
   // PacketParser 초기화
   packet::PacketParser parser;
@@ -58,6 +61,17 @@ int main() {
                                         &ptp_server);
   subscriber_manager.RegisterSubscriber(
       packet::MessageType::kPTPReportSlaveToMaster, &ptp_server);
+
+  // DebugMessageReceiver 초기화 및 등록
+  DebugMessageReceiver debug_receiver;
+  debug_receiver.RegisterCallback([](const std::string& message) {
+    std::cout << "[Host PC] <<< Received Debug Message: " << message
+              << std::endl;
+  });
+  subscriber_manager.RegisterSubscriber(packet::MessageType::kDebugEchoMsg,
+                                        &debug_receiver);
+  subscriber_manager.RegisterSubscriber(packet::MessageType::kDebugHeartBeatMsg,
+                                        &debug_receiver);
 
   // 메인 루프
   while (true) {

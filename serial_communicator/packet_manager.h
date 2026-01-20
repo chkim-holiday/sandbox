@@ -87,8 +87,15 @@ class DebugMessageReceiver : public PacketSubscriber {
 
   void HandlePacket(const packet::Packet& packet) override {
     // 디버그 메시지 형태: ASCII 문자열
-    std::string message(reinterpret_cast<const char*>(packet.data),
-                        packet.length);
+    std::string message =
+        std::to_string(packet.timestamp_ns) + " ns: " +
+        std::string(reinterpret_cast<const char*>(packet.data), packet.length);
+    if (packet.id == static_cast<uint8_t>(packet::MessageType::kDebugEchoMsg)) {
+      message = "[ECHO] " + message;
+    } else if (packet.id ==
+               static_cast<uint8_t>(packet::MessageType::kDebugHeartBeatMsg)) {
+      message = "[HEARTBEAT] " + message;
+    }
     if (callback_) callback_(message);
   }
 

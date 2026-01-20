@@ -9,6 +9,8 @@
 #include "packet_serializer.h"
 #include "serial_communicator.h"
 
+#define SERIAL_BAUDRATE 460800
+
 template <typename T>
 union ByteConverter {
   T value;
@@ -104,7 +106,7 @@ int main(int argc, char* argv[]) {
 
   // Serial port 설정
   std::string port_name = "/dev/ttyACM0";  // 기본값
-  int baudrate = 460800;
+  int baudrate = SERIAL_BAUDRATE;
 
   if (argc >= 2) port_name = argv[1];
   if (argc >= 3) baudrate = std::atoi(argv[2]);
