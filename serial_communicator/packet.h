@@ -9,13 +9,19 @@
 namespace packet {
 
 enum MessageType : uint8_t {
+  // Debug messages
   kDebugEchoMsg = 0x01,
   kDebugHeartBeatMsg = 0x02,
+  // PTP messages
   kPTPSync = 0x10,
   kPTPDelayRequest = 0x11,
   kPTPDelayResponse = 0x12,
   kPTPReportSlaveToMaster = 0x13,
+  // sensor data
   kIMUData = 0x20,
+  kOdometerData = 0x21,
+  // command messages
+  kCommandMessage = 0x30
 };
 
 struct Packet {
