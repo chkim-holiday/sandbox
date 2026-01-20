@@ -200,12 +200,23 @@ class SerialPTPv2Server : public PacketSubscriber {
               << std::endl;
     int64_t offset = 0;
     uint64_t delay = 0;
-    std::memcpy(&offset, packet.data, 8);
-    std::memcpy(&delay, packet.data + 8, 8);
-    double offset_in_ms = static_cast<double>(offset) / 1e6;
-    double delay_in_ms = static_cast<double>(delay) / 1e6;
-    std::cout << "   - Reported offset: " << offset_in_ms << " ms" << std::endl;
-    std::cout << "   - Reported path delay: " << delay_in_ms << " ms"
+    // std::memcpy(&offset, packet.data, 8);
+    // std::memcpy(&delay, packet.data + 8, 8);
+    uint64_t t1, t2, t3, t4;
+    std::memcpy(&t1, packet.data, 8);
+    std::memcpy(&t2, packet.data + 8, 8);
+    std::memcpy(&t3, packet.data + 16, 8);
+    std::memcpy(&t4, packet.data + 24, 8);
+    offset = ((int64_t)(t2 - t1) - (int64_t)(t4 - t3)) / 2;
+    delay = ((t2 - t1) + (t4 - t3)) / 2;
+    std::cout << "   - Reported timestamps:" << std::endl;
+    std::cout << "       T1: " << t1 << " ns" << std::endl;
+    std::cout << "       T2: " << t2 << " ns" << std::endl;
+    std::cout << "       T3: " << t3 << " ns" << std::endl;
+    std::cout << "       T4: " << t4 << " ns" << std::endl;
+    std::cout << "   - Reported offset             : " << offset << " ns"
+              << std::endl;
+    std::cout << "   - Reported path delay(one-way): " << delay << " ns"
               << std::endl;
   }
 

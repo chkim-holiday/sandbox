@@ -19,12 +19,11 @@ enum MessageType {
 };
 
 struct __attribute__((packed)) Packet {
-  uint8_t header1;        // 0xAA
-  uint8_t header2;        // 0x55
-  uint64_t timestamp_ns;  // 나노초
-  uint8_t id;             // MessageType
-  uint8_t seq;            // 시퀀스 번호
-  uint8_t len;            // data 길이 (0-255)
+  uint64_t timestamp_ns;        // 패킷에 포함된 타임스탬프
+  uint8_t id;                   // MessageType
+  uint8_t seq;                  // 시퀀스 번호
+  uint8_t len;                  // data 길이 (0-255)
+  uint64_t local_timestamp_ns;  // 수신 시점 타임스탬프
 };
 
 // ========== RX 상태 머신 ==========
@@ -59,11 +58,11 @@ class PacketParser {
     packet_ready_ = false;
   }
 
-  void FeedByte(uint8_t byte, uint64_t timestamp) {
+  void FeedByte(uint8_t byte, uint64_t local_timestamp) {
     switch (state) {
       case WAIT_HEADER1:
         if (byte == PKT_HEADER_1) {
-          local_timestamp_at_header1_ = timestamp;
+          local_timestamp_at_header1_ = local_timestamp;
           rx_buffer[0] = byte;
           rx_index_ = 1;
           state = WAIT_HEADER2;
@@ -80,7 +79,7 @@ class PacketParser {
           //   printf("[PARSER] Invalid Header2: 0x%02X, resetting\n", byte);
           Reset();
           if (byte == PKT_HEADER_1) {
-            local_timestamp_at_header1_ = timestamp;
+            local_timestamp_at_header1_ = local_timestamp;
             rx_buffer[0] = byte;
             rx_index_ = 1;
             state = WAIT_HEADER2;
@@ -117,6 +116,7 @@ class PacketParser {
         current_packet_.id = rx_buffer[10];
         current_packet_.seq = rx_buffer[11];
         current_packet_.len = byte;
+        current_packet_.local_timestamp_ns = local_timestamp_at_header1_;
         // printf("[PARSER] LEN=%d, ID=0x%02X, SEQ=%d\n", byte,
         // current_packet_.id,
         //    current_packet_.seq);
@@ -141,7 +141,6 @@ class PacketParser {
         uint8_t calc_crc = ComputeCRC8(rx_buffer, rx_index_ - 1);
         // printf("[PARSER] CRC: calc=0x%02X, recv=0x%02X\n", calc_crc, byte);
         if (calc_crc == byte) {
-          current_packet_.timestamp_ns = local_timestamp_at_header1_;
           packet_ready_ = true;
           //   printf("Packet ready!");
           //   printf("[PKT] ID=0x%02X, seq=%d, len=%d, CRC OK\n",
@@ -176,6 +175,8 @@ Mail<RxByte, 512> rx_mail;
 uint64_t t1_from_host = 0;
 uint64_t t2_at_local = 0;
 uint64_t t3_at_local = 0;
+uint64_t t4_from_host = 0;
+uint64_t last_send_timestamp = 0;
 int64_t clock_offset = 0;
 uint64_t path_delay = 0;
 
@@ -202,7 +203,7 @@ void SendPacket(uint8_t msg_id, const uint8_t* data, uint8_t data_len) {
 
   uint8_t crc = ComputeCRC8(buffer, offset);
   buffer[offset++] = crc;
-
+  last_send_timestamp = timer.elapsed_time().count() * 1000ULL;
   serial.write(buffer, offset);
   //   printf("[TX] Sent %zu bytes, ID=0x%02X, seq=%d\n", offset, msg_id, seq);
 }
@@ -210,8 +211,9 @@ void SendPacket(uint8_t msg_id, const uint8_t* data, uint8_t data_len) {
 void SendSync() { SendPacket(kPTPSync, NULL, 0); }
 
 void SendDelayReq() {
-  t3_at_local = timer.elapsed_time().count() * 1000ULL;
+  // t3_at_local = timer.elapsed_time().count() * 1000ULL;
   SendPacket(kPTPDelayReq, NULL, 0);
+  t3_at_local = last_send_timestamp;
 }
 
 void SendDelayResp(uint8_t req_seq, uint64_t t2) {
@@ -219,6 +221,16 @@ void SendDelayResp(uint8_t req_seq, uint64_t t2) {
   data[0] = req_seq;
   memcpy(data + 1, &t2, 8);
   SendPacket(kPTPDelayResp, data, 9);
+}
+
+void SendPTPReportSlaveToMaster(uint64_t t1, uint64_t t2, uint64_t t3,
+                                uint64_t t4) {
+  uint8_t data[32];
+  memcpy(data, &t1, 8);
+  memcpy(data + 8, &t2, 8);
+  memcpy(data + 16, &t3, 8);
+  memcpy(data + 24, &t4, 8);
+  SendPacket(kPTPReportSlaveToMaster, data, 32);
 }
 
 // ========== RX 인터럽트 ==========
@@ -243,7 +255,6 @@ void HandleRxInterrupt() {
 // ========== PTP 핸들러 ==========
 void HandleEcho(Packet* pkt) {
   led = !led;
-  printf("ECHO received: len=%d\n", pkt->len);
   SendPacket(kEchoMsg, parser.packet_data_, pkt->len);
   led = !led;
 }
@@ -252,23 +263,25 @@ void HandleSync(Packet* pkt) {
   led = !led;
   t1_from_host = pkt->timestamp_ns;
   t2_at_local = parser.local_timestamp_at_header1_;
-  printf("\n[SYNC] T1=%llu, T2=%llu\n", t1_from_host, t2_at_local);
   SendDelayReq();
 }
 
 void HandleDelayResp(Packet* pkt) {
-  uint8_t req_seq = parser.packet_data_[0];
-  uint64_t t2_master, t4;
-  memcpy(&t2_master, parser.packet_data_ + 1, 8);
-  t4 = pkt->timestamp_ns;
+  // uint8_t request_seq = parser.packet_data_[0];
+  led = !led;
+  uint64_t t4_from_host;
+  t4_from_host = pkt->timestamp_ns;
 
-  int64_t forward_delay = (int64_t)t2_at_local - (int64_t)t1_from_host;
-  int64_t reverse_delay = (int64_t)t4 - (int64_t)t3_at_local;
-  clock_offset = (forward_delay - reverse_delay) / 2;
+  uint64_t forward_delay = t2_at_local - t1_from_host;
+  uint64_t reverse_delay = t4_from_host - t3_at_local;
+  clock_offset = (static_cast<int64_t>(forward_delay) -
+                  static_cast<int64_t>(reverse_delay)) /
+                 2;
   path_delay = (forward_delay + reverse_delay) / 2;
-
-  printf("[DELAY_RESP] offset=%lld ns, delay=%llu ns\n", clock_offset,
-         path_delay);
+  // SendPTPReportSlaveToMaster(clock_offset, path_delay);
+  SendPTPReportSlaveToMaster(t1_from_host, t2_at_local, t3_at_local,
+                             t4_from_host);
+  led = !led;
 }
 
 // ========== 메인 ==========
@@ -303,7 +316,6 @@ int main() {
             HandleDelayResp(&parser.current_packet_);
             break;
           default:
-            printf("Unknown ID: 0x%02X\n", parser.current_packet_.id);
             break;
         }
         parser.packet_ready_ = false;
