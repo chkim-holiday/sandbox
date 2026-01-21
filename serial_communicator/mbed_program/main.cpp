@@ -143,6 +143,7 @@ class PacketParser {
 
 // ========== 글로벌 변수 ==========
 DigitalOut led(LED1);
+DigitalOut trg(D8);
 UnbufferedSerial serial(USBTX, USBRX, SERIAL_BAUDRATE);
 Timer timer;
 PacketParser parser;
@@ -279,10 +280,14 @@ int main() {
   ThisThread::sleep_for(200ms);
 
   unsigned long loop_count = 0;
-  uint64_t last_led_toggle = 0;  // 추가
 
-  uint64_t last_led_set_true = 0;
-  uint64_t last_led_set_false = 0;
+  bool sync_detected = false;
+  uint64_t current_time = GetLocalTime();
+  uint64_t next_trigger_time = (current_time / 200000000ULL) * 200000000ULL;
+  if (current_time % 200000000ULL != 0) {
+    next_trigger_time += 200000000ULL;
+  }
+
   while (1) {
     osEvent evt = rx_mail.get(0);
 
@@ -312,6 +317,18 @@ int main() {
     loop_count++;
     if (loop_count % 5000 == 0) {
       SendPacket(kHeartBeatMsg, NULL, 0);
+    }
+
+    uint64_t now = GetSynchronizedTime();
+    if (!sync_detected && now >= next_trigger_time + 400000000ULL) {
+      sync_detected = true;
+      next_trigger_time = (now / 200000000ULL) * 200000000ULL;
+      if (now % 200000000ULL != 0) next_trigger_time += 200000000ULL;
+    }
+    if (now >= next_trigger_time) {
+      led = !led;                         // GPIO 핀 상태 토글
+      trg = !trg;                         // 트리거 핀 상태 토글
+      next_trigger_time += 200000000ULL;  // 다음 200ms 배수로 갱신
     }
 
     wait_us(100);
