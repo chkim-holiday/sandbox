@@ -310,7 +310,7 @@ int main() {
     }
 
     loop_count++;
-    if (loop_count % 500 == 0) {
+    if (loop_count % 5000 == 0) {
       SendPacket(kHeartBeatMsg, NULL, 0);
     }
 

@@ -1,10 +1,34 @@
 #ifndef MESSAGE_DISPATCHER_H_
 #define MESSAGE_DISPATCHER_H_
 
+#include <iomanip>
+#include <iostream>
+#include <sstream>
+
 #include "packet_parser.h"
 #include "packet_serializer.h"
 #include "serial_communicator.h"
 #include "timer.h"
+
+struct Timestamp {
+  uint32_t sec{0};
+  uint32_t nsec{0};
+  Timestamp() {}
+  Timestamp(uint64_t timestamp_ns) {
+    sec = static_cast<uint32_t>(timestamp_ns / 1000000000ULL);
+    nsec = static_cast<uint32_t>(timestamp_ns % 1000000000ULL);
+  }
+  double ToDouble() const {
+    return static_cast<double>(sec) + static_cast<double>(nsec) * 1e-9;
+  }
+
+  friend std::ostream& operator<<(std::ostream& os,
+                                  const Timestamp& timestamp) {
+    os << "[" << timestamp.sec << "." << std::setfill('0') << std::setw(9)
+       << timestamp.nsec << "] ";
+    return os;
+  }
+};
 
 uint64_t GetLocalTime() {
   return static_cast<uint64_t>(
@@ -29,10 +53,21 @@ union ByteConverter {
   uint8_t bytes[sizeof(T)];
 };
 
+struct ImuData {
+  uint64_t timestamp_ns{0};
+  int16_t ax{0};
+  int16_t ay{0};
+  int16_t az{0};
+  int16_t gx{0};
+  int16_t gy{0};
+  int16_t gz{0};
+  int16_t temperature{0};
+};
+
 class PacketSubscriber {
  public:
   virtual ~PacketSubscriber() = default;
-  virtual void HandlePacket(const packet::Packet& packet) = 0;
+  virtual void PacketCallback(const packet::Packet& packet) = 0;
 };
 
 class PacketPublisher {
@@ -68,8 +103,7 @@ class CommandMessageProcessor : public PacketSubscriber,
     (void)written;
   }
 
-  void HandlePacket(const packet::Packet& packet) override {
-    // 명령어 메시지 형태: ASCII 문자열
+  void PacketCallback(const packet::Packet& packet) override {
     std::string command(reinterpret_cast<const char*>(packet.data),
                         packet.length);
     if (callback_) callback_(command);
@@ -85,18 +119,19 @@ class DebugMessageReceiver : public PacketSubscriber {
  public:
   using Callback = std::function<void(const std::string& message)>;
 
-  void HandlePacket(const packet::Packet& packet) override {
-    // 디버그 메시지 형태: ASCII 문자열
-    std::string message =
-        std::to_string(packet.timestamp_ns) + " ns: " +
+  void PacketCallback(const packet::Packet& packet) override {
+    std::string debug_msg =
         std::string(reinterpret_cast<const char*>(packet.data), packet.length);
+    std::stringstream ss;
     if (packet.id == static_cast<uint8_t>(packet::MessageType::kDebugEchoMsg)) {
-      message = "[ECHO] " + message;
+      ss << Timestamp(packet.timestamp_ns) << "[MCU] => [PC]: "
+         << "[ECHO] " << debug_msg;
     } else if (packet.id ==
                static_cast<uint8_t>(packet::MessageType::kDebugHeartBeatMsg)) {
-      message = "[HEARTBEAT] " + message;
+      ss << Timestamp(packet.timestamp_ns) << "[MCU] => [PC]: "
+         << "[HEARTBEAT] " << debug_msg;
     }
-    if (callback_) callback_(message);
+    if (callback_) callback_(ss.str());
   }
 
   void RegisterCallback(Callback callback) { callback_ = callback; }
@@ -107,20 +142,9 @@ class DebugMessageReceiver : public PacketSubscriber {
 
 class IMUMessageReceiver : public PacketSubscriber {
  public:
-  struct ImuData {
-    uint64_t timestamp_ns{0};
-    int16_t ax{0};
-    int16_t ay{0};
-    int16_t az{0};
-    int16_t gx{0};
-    int16_t gy{0};
-    int16_t gz{0};
-    int16_t temperature{0};
-  };
-
   using Callback = std::function<void(const ImuData& imu_data)>;
 
-  void HandlePacket(const packet::Packet& packet) override {
+  void PacketCallback(const packet::Packet& packet) override {
     // IMU 데이터 형태
     // ax_high, ax_low, ay_high, ay_low, az_high, az_low,
     // gx_high, gx_low, gy_high, gy_low, gz_high, gz_low,
@@ -151,23 +175,21 @@ class IMUMessageReceiver : public PacketSubscriber {
   Callback callback_;
 };
 
-class SerialPTPv2Server : public PacketSubscriber {
+class SerialPTPServer : public PacketSubscriber {
  public:
-  SerialPTPv2Server(serial_communicator::SerialCommunicator& comm,
-                    const int sync_period_in_ms, timer::Timer& sync_timer)
-      : comm_(comm),
-        sync_period_in_ms_(sync_period_in_ms),
-        sync_timer_(sync_timer) {
-    sync_timer_.Start(sync_period_in_ms_, [this]() { SendSync(); });
+  SerialPTPServer(serial_communicator::SerialCommunicator& comm,
+                  timer::Timer& sync_timer, const int kSyncPeriodInMs)
+      : comm_(comm), sync_timer_(sync_timer) {
+    sync_timer_.Start(kSyncPeriodInMs, [this]() { SendSync(); });
   }
 
-  void HandlePacket(const packet::Packet& packet) override {
+  void PacketCallback(const packet::Packet& packet) override {
     switch (packet.id) {
       case packet::MessageType::kPTPDelayRequest: {
         HandleDelayRequest(packet);
       } break;
-      case packet::MessageType::kPTPReportSlaveToMaster: {
-        HandlePTPReportSlaveToMaster(packet);
+      case packet::MessageType::kPTPReportToMaster: {
+        HandlePTPReportToMaster(packet);
       } break;
       case packet::MessageType::kPTPSync:
       case packet::MessageType::kPTPDelayResponse: {
@@ -184,7 +206,8 @@ class SerialPTPv2Server : public PacketSubscriber {
 
  private:
   void SendSync() {
-    std::cerr << "[Host]->[Slave]: Sending SYNC packet." << std::endl;
+    std::cerr << Timestamp(GetLocalTime())
+              << "[MCU] <= [PC]: Sending SYNC packet." << std::endl;
     static uint8_t sync_seq = 0;
 
     ByteConverter<uint64_t> current_timestamp = GetLocalTime();
@@ -198,12 +221,14 @@ class SerialPTPv2Server : public PacketSubscriber {
   }
 
   void HandleDelayRequest(const packet::Packet&) {
-    std::cout << "[Slave]->[Host]: Received DELAY_REQ message." << std::endl;
+    std::cout << Timestamp(GetLocalTime())
+              << "[MCU] <= [PC]: Received DELAY_REQ message." << std::endl;
     SendDelayResponse();
   }
 
-  void HandlePTPReportSlaveToMaster(const packet::Packet& packet) {
-    std::cout << "[Slave]->[Host]: Received PTP REPORT_SLAVE_TO_MASTER message."
+  void HandlePTPReportToMaster(const packet::Packet& packet) {
+    std::cout << Timestamp(GetLocalTime())
+              << "[MCU] => [PC]: Received PTP_REPORT_TO_MASTER message."
               << std::endl;
     int64_t offset = 0;
     uint64_t delay = 0;
@@ -229,7 +254,8 @@ class SerialPTPv2Server : public PacketSubscriber {
 
   void SendDelayResponse() {
     ByteConverter<uint64_t> current_timestamp = GetLocalTime();
-    std::cout << "[Host]->[Slave]: Sending DELAY_RESPONSE T4="
+    std::cout << Timestamp(current_timestamp.value)
+              << "[MCU] <= [PC]: Sending DELAY_RESPONSE. t4="
               << current_timestamp.value << " ns " << std::endl;
 
     const auto serialized_packet = packet::PacketSerializer::SerializePacket(
@@ -242,7 +268,6 @@ class SerialPTPv2Server : public PacketSubscriber {
   }
 
   serial_communicator::SerialCommunicator& comm_;
-  int sync_period_in_ms_;
   timer::Timer& sync_timer_;
 };
 
@@ -258,15 +283,18 @@ class PacketSubscriberManager {
     subscribers_[message_id] = subscriber;
   }
 
+  void SubscribePacket(const std::function<void(const packet::Packet&)>& func) {
+  }
+
  private:
   void DispatchPacket(const packet::Packet& packet) {
     auto it = subscribers_.find(static_cast<packet::MessageType>(packet.id));
-    if (it != subscribers_.end()) {
-      it->second->HandlePacket(packet);
-    } else {
+    if (it == subscribers_.end()) {
       std::cerr << "No subscriber registered for message ID: "
                 << static_cast<int>(packet.id) << std::endl;
+      return;
     }
+    it->second->PacketCallback(packet);
   }
 
   packet::PacketParser& parser_;

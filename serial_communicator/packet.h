@@ -16,7 +16,7 @@ enum MessageType : uint8_t {
   kPTPSync = 0x10,
   kPTPDelayRequest = 0x11,
   kPTPDelayResponse = 0x12,
-  kPTPReportSlaveToMaster = 0x13,
+  kPTPReportToMaster = 0x13,
   // sensor data
   kIMUData = 0x20,
   kOdometerData = 0x21,

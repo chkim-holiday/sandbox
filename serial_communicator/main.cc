@@ -128,7 +128,7 @@ int main(int argc, char* argv[]) {
          "PTP DELAY_REQ"},
         {static_cast<uint8_t>(packet::MessageType::kPTPDelayResponse),
          "PTP DELAY_RESP"},
-        {static_cast<uint8_t>(packet::MessageType::kPTPReportSlaveToMaster),
+        {static_cast<uint8_t>(packet::MessageType::kPTPReportToMaster),
          "PTP REPORT_SLAVE_TO_MASTER"},
         {static_cast<uint8_t>(packet::MessageType::kIMUData), "IMU DATA"},
     };
@@ -214,8 +214,8 @@ int main(int argc, char* argv[]) {
         std::cout << packet.data[i];
       }
       std::cout << std::endl;
-    } else if (packet.id == static_cast<uint8_t>(
-                                packet::MessageType::kPTPReportSlaveToMaster)) {
+    } else if (packet.id ==
+               static_cast<uint8_t>(packet::MessageType::kPTPReportToMaster)) {
       // PTP Report 메시지 수신
       std::cout << "<<< Received PTP REPORT_SLAVE_TO_MASTER message."
                 << std::endl;

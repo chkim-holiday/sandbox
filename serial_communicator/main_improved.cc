@@ -7,67 +7,56 @@
 #define SERIAL_BAUDRATE 921600
 
 int main() {
+  // PacketParser 초기화
+  packet::PacketParser parser;
+
   // SerialCommunicator 초기화
   serial_communicator::SerialCommunicator serial_comm("/dev/ttyACM0",
                                                       SERIAL_BAUDRATE);
-
-  // PacketParser 초기화
-  packet::PacketParser parser;
-  serial_comm.SetDataCallback([&parser](const uint8_t* data, size_t len) {
+  auto serial_data_cb = [&parser](const uint8_t* data, size_t len) {
     parser.AppendRawData(data, len);
-  });
-  serial_comm.SetErrorCallback([](const std::string& error) {
+  };
+  auto serial_error_cb = [](const std::string& error) {
     std::cerr << "Serial error: " << error << std::endl;
-  });
+  };
+  serial_comm.SetDataCallback(serial_data_cb).SetErrorCallback(serial_error_cb);
   if (!serial_comm.StartSerialCommunication()) {
     std::cerr << "Failed to start serial communication." << std::endl;
     return -1;
   }
 
-  // PacketDispatcher 초기화
+  // PacketSubscriberManager 초기화
   PacketSubscriberManager subscriber_manager(parser);
 
   // CommandMessageProcessor 초기화 및 등록
+  auto command_callback = [](const std::string& command) { (void)command; };
   CommandMessageProcessor command_processor(serial_comm);
-  command_processor.RegisterCallback([](const std::string& command) {
-    std::cout << "[Host PC] <<< Received Command: " << command << std::endl;
-    if (command == "SET_SPEED 100") {
-      std::cout << "[Host PC] >>> Setting speed to 100" << std::endl;
-    }
-  });
+  command_processor.RegisterCallback(command_callback);
   subscriber_manager.RegisterSubscriber(packet::MessageType::kCommandMessage,
                                         &command_processor);
 
   // IMUMessageReceiver 초기화 및 등록
+  auto imu_callback = [](const ImuData& imu_data) { (void)imu_data; };
   IMUMessageReceiver imu_receiver;
-  imu_receiver.RegisterCallback(
-      [](const IMUMessageReceiver::ImuData& imu_data) {
-        std::cout << "[Host PC] <<< Received IMU Data:" << std::endl;
-        std::cout << "  Acceleration: ax=" << imu_data.ax
-                  << ", ay=" << imu_data.ay << ", az=" << imu_data.az
-                  << std::endl;
-        std::cout << "  Gyroscope: gx=" << imu_data.gx << ", gy=" << imu_data.gy
-                  << ", gz=" << imu_data.gz << std::endl;
-        std::cout << "  Temperature: " << imu_data.temperature << std::endl;
-      });
+  imu_receiver.RegisterCallback(imu_callback);
   subscriber_manager.RegisterSubscriber(packet::MessageType::kIMUData,
                                         &imu_receiver);
 
-  // SerialPTPv2Server 초기화 및 등록
-  const int sync_period_in_ms = 2000;  // 예: 1000ms (1초)
+  // SerialPTPServer 초기화 및 등록
+  constexpr int kSyncPeriodInMs{2000};
   timer::Timer sync_timer;
-  SerialPTPv2Server ptp_server(serial_comm, sync_period_in_ms, sync_timer);
+  SerialPTPServer serial_ptp_server(serial_comm, sync_timer, kSyncPeriodInMs);
   subscriber_manager.RegisterSubscriber(packet::MessageType::kPTPDelayRequest,
-                                        &ptp_server);
-  subscriber_manager.RegisterSubscriber(
-      packet::MessageType::kPTPReportSlaveToMaster, &ptp_server);
+                                        &serial_ptp_server);
+  subscriber_manager.RegisterSubscriber(packet::MessageType::kPTPReportToMaster,
+                                        &serial_ptp_server);
 
   // DebugMessageReceiver 초기화 및 등록
+  auto debug_callback = [](const std::string& message) {
+    std::cout << message << std::endl;
+  };
   DebugMessageReceiver debug_receiver;
-  debug_receiver.RegisterCallback([](const std::string& message) {
-    std::cout << "[Host PC] <<< Received Debug Message: " << message
-              << std::endl;
-  });
+  debug_receiver.RegisterCallback(debug_callback);
   subscriber_manager.RegisterSubscriber(packet::MessageType::kDebugEchoMsg,
                                         &debug_receiver);
   subscriber_manager.RegisterSubscriber(packet::MessageType::kDebugHeartBeatMsg,
