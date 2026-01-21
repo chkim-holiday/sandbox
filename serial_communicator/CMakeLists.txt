@@ -24,3 +24,8 @@ add_executable(serial_comm_improved main_improved.cc crc8_table.h
                                     packet_serializer.h serial_communicator.h)
 target_link_libraries(serial_comm_improved PRIVATE Threads::Threads crc8_lib)
 install(TARGETS serial_comm_improved DESTINATION bin)
+
+add_executable(serial_comm_improved_rpi4b main_improved_rpi4b.cc crc8_table.h
+                                    packet_serializer.h serial_communicator.h)
+target_link_libraries(serial_comm_improved_rpi4b PRIVATE Threads::Threads pigpio crc8_lib)
+install(TARGETS serial_comm_improved_rpi4b DESTINATION bin)
