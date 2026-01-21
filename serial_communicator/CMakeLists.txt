@@ -25,6 +25,10 @@ add_executable(serial_comm_improved main_improved.cc crc8_table.h
 target_link_libraries(serial_comm_improved PRIVATE Threads::Threads crc8_lib)
 install(TARGETS serial_comm_improved DESTINATION bin)
 
+add_executable(serial_comm_class main_communicator.cc communicator.h)
+target_link_libraries(serial_comm_class PRIVATE Threads::Threads)
+install(TARGETS serial_comm_class DESTINATION bin)
+
 # For Raspberry PI only
 if(NOT EXISTS "/usr/include/pigpio.h")
   message(

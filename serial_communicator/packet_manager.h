@@ -284,6 +284,7 @@ class PacketSubscriberManager {
   }
 
   void SubscribePacket(const std::function<void(const packet::Packet&)>& func) {
+    (void)func;
   }
 
  private:
