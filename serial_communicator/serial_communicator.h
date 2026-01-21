@@ -34,7 +34,7 @@ class SerialCommunicator {
 
   ~SerialCommunicator();
 
-  bool StartSerialCommunication();
+  bool Start();
 
   SerialCommunicator& SetDataCallback(DataCallback data_callback) {
     data_callback_ = data_callback;
@@ -68,7 +68,7 @@ SerialCommunicator::SerialCommunicator(const std::string& port_name,
                                        int baudrate)
     : serial_port_{port_name, static_cast<uint32_t>(baudrate), -1} {}
 
-bool SerialCommunicator::StartSerialCommunication() {
+bool SerialCommunicator::Start() {
   if (!data_callback_) {
     std::cerr << "Data callback is not set. Cannot start serial communication."
               << std::endl;

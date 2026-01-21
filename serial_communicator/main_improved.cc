@@ -20,7 +20,7 @@ int main() {
     std::cerr << "Serial error: " << error << std::endl;
   };
   serial_comm.SetDataCallback(serial_data_cb).SetErrorCallback(serial_error_cb);
-  if (!serial_comm.StartSerialCommunication()) {
+  if (!serial_comm.Start()) {
     std::cerr << "Failed to start serial communication." << std::endl;
     return -1;
   }

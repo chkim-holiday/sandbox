@@ -274,7 +274,7 @@ int main(int argc, char* argv[]) {
     SerialCommunicator comm(port_name, baudrate);
     comm.SetDataCallback(data_callback);
     comm.SetErrorCallback(error_callback);
-    if (!comm.StartSerialCommunication()) {
+    if (!comm.Start()) {
       throw std::runtime_error("Failed to start serial communication.");
     }
 
