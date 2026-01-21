@@ -206,8 +206,6 @@ class SerialPTPServer : public PacketSubscriber {
 
  private:
   void SendSync() {
-    std::cerr << Timestamp(GetLocalTime())
-              << "[MCU] <= [PC]: Sending SYNC packet." << std::endl;
     static uint8_t sync_seq = 0;
 
     ByteConverter<uint64_t> current_timestamp = GetLocalTime();
@@ -217,13 +215,15 @@ class SerialPTPServer : public PacketSubscriber {
     const size_t written =
         comm_.Write(reinterpret_cast<const uint8_t*>(serialized_packet.data()),
                     serialized_packet.size());
+    std::cerr << Timestamp(GetLocalTime())
+              << "[MCU] <= [PC]: Sending SYNC packet." << std::endl;
     (void)written;
   }
 
   void HandleDelayRequest(const packet::Packet&) {
+    SendDelayResponse();
     std::cout << Timestamp(GetLocalTime())
               << "[MCU] <= [PC]: Received DELAY_REQ message." << std::endl;
-    SendDelayResponse();
   }
 
   void HandlePTPReportToMaster(const packet::Packet& packet) {
@@ -254,9 +254,6 @@ class SerialPTPServer : public PacketSubscriber {
 
   void SendDelayResponse() {
     ByteConverter<uint64_t> current_timestamp = GetLocalTime();
-    std::cout << Timestamp(current_timestamp.value)
-              << "[MCU] <= [PC]: Sending DELAY_RESPONSE. t4="
-              << current_timestamp.value << " ns " << std::endl;
 
     const auto serialized_packet = packet::PacketSerializer::SerializePacket(
         current_timestamp.value, packet::MessageType::kPTPDelayResponse, 0,
@@ -264,6 +261,9 @@ class SerialPTPServer : public PacketSubscriber {
     const size_t written =
         comm_.Write(reinterpret_cast<const uint8_t*>(serialized_packet.data()),
                     serialized_packet.size());
+    std::cout << Timestamp(current_timestamp.value)
+              << "[MCU] <= [PC]: Sending DELAY_RESPONSE. t4="
+              << current_timestamp.value << " ns " << std::endl;
     (void)written;
   }
 

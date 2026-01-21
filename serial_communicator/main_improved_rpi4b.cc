@@ -24,7 +24,7 @@ int main() {
   serial_comm.SetErrorCallback([](const std::string& error) {
     std::cerr << "Serial error: " << error << std::endl;
   });
-  if (!serial_comm.StartSerialCommunication()) {
+  if (!serial_comm.Start()) {
     std::cerr << "Failed to start serial communication." << std::endl;
     return -1;
   }
@@ -45,27 +45,25 @@ int main() {
 
   // IMUMessageReceiver 초기화 및 등록
   IMUMessageReceiver imu_receiver;
-  imu_receiver.RegisterCallback(
-      [](const IMUMessageReceiver::ImuData& imu_data) {
-        std::cout << "[Host PC] <<< Received IMU Data:" << std::endl;
-        std::cout << "  Acceleration: ax=" << imu_data.ax
-                  << ", ay=" << imu_data.ay << ", az=" << imu_data.az
-                  << std::endl;
-        std::cout << "  Gyroscope: gx=" << imu_data.gx << ", gy=" << imu_data.gy
-                  << ", gz=" << imu_data.gz << std::endl;
-        std::cout << "  Temperature: " << imu_data.temperature << std::endl;
-      });
+  imu_receiver.RegisterCallback([](const ImuData& imu_data) {
+    std::cout << "[Host PC] <<< Received IMU Data:" << std::endl;
+    std::cout << "  Acceleration: ax=" << imu_data.ax << ", ay=" << imu_data.ay
+              << ", az=" << imu_data.az << std::endl;
+    std::cout << "  Gyroscope: gx=" << imu_data.gx << ", gy=" << imu_data.gy
+              << ", gz=" << imu_data.gz << std::endl;
+    std::cout << "  Temperature: " << imu_data.temperature << std::endl;
+  });
   subscriber_manager.RegisterSubscriber(packet::MessageType::kIMUData,
                                         &imu_receiver);
 
   // SerialPTPv2Server 초기화 및 등록
   const int sync_period_in_ms = 6000;  // 예: 1000ms (1초)
   timer::Timer sync_timer;
-  SerialPTPv2Server ptp_server(serial_comm, sync_period_in_ms, sync_timer);
+  SerialPTPServer ptp_server(serial_comm, sync_timer, sync_period_in_ms);
   subscriber_manager.RegisterSubscriber(packet::MessageType::kPTPDelayRequest,
                                         &ptp_server);
-  subscriber_manager.RegisterSubscriber(
-      packet::MessageType::kPTPReportSlaveToMaster, &ptp_server);
+  subscriber_manager.RegisterSubscriber(packet::MessageType::kPTPReportToMaster,
+                                        &ptp_server);
 
   // DebugMessageReceiver 초기화 및 등록
   DebugMessageReceiver debug_receiver;
@@ -89,18 +87,18 @@ int main() {
 
   // 메인 루프
   uint64_t current_time = GetLocalTime();
-  uint64_t next_trigger_time = (current_time / 200000000ULL) * 200000000ULL;
-  if (current_time % 200000000ULL != 0) {
-    next_trigger_time += 200000000ULL;
+  uint64_t next_trigger_time = (current_time / 20000000ULL) * 20000000ULL;
+  if (current_time % 20000000ULL != 0) {
+    next_trigger_time += 20000000ULL;
   }
 
   bool gpio_state = false;
   while (true) {
     auto synchronized_time = GetLocalTime();
     if (synchronized_time >= next_trigger_time) {
-      next_trigger_time += 200000000ULL;
       gpio_state = !gpio_state;
-      gpioWrite(GPIO_PIN, gpio_state ? 1 : 0);
+      gpioWrite(GPIO_PIN, gpio_state);
+      next_trigger_time += 20000000ULL;
     }
     // std::this_thread::sleep_for(std::chrono::microseconds(10));
   }
