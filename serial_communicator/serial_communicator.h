@@ -36,12 +36,14 @@ class SerialCommunicator {
 
   bool StartSerialCommunication();
 
-  void SetDataCallback(DataCallback data_callback) {
+  SerialCommunicator& SetDataCallback(DataCallback data_callback) {
     data_callback_ = data_callback;
+    return *this;
   }
 
-  void SetErrorCallback(ErrorCallback error_callback) {
+  SerialCommunicator& SetErrorCallback(ErrorCallback error_callback) {
     error_callback_ = error_callback;
+    return *this;
   }
 
   size_t Write(const uint8_t* data, size_t len);
