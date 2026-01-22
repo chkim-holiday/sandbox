@@ -7,7 +7,8 @@ if len(sys.argv) > 1:
     filename = sys.argv[1]
 else:
     # filename = 'digital.csv'  # 기본값
-    filename = 'digital_no_verbose_921600.csv'  # 기본값
+    # filename = 'digital_no_verbose_921600.csv'  # 기본값
+    filename = 'digital_no_verbose_460800.csv'  # 기본값
 
 df = pd.read_csv(filename)
 
@@ -28,5 +29,24 @@ if len(even_idx) > 0 and np.all(even_idx < len(times)):
     print(f"  표준편차: {np.std(intervals)} ms")
     print(f"  최소: {np.min(intervals)} ms")
     print(f"  최대: {np.max(intervals)} ms")
+
+    # 그래프 그리기
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 2, 1)
+    plt.hist(intervals, bins=50, color='skyblue', edgecolor='black')
+    plt.title('Offset histogram (ms)')
+    plt.xlabel('Interval (ms)')
+    plt.ylabel('Count')
+
+    plt.subplot(1, 2, 2)
+    plt.plot(intervals, marker='o', linestyle='-', color='orange')
+    plt.title('Offset time series (ms)')
+    plt.xlabel('Index')
+    plt.ylabel('Interval (ms)')
+    plt.ylim(0, 1.0)
+
+    plt.tight_layout()
+    plt.show()
 else:
     print("데이터가 부족하거나 인덱스 오류로 통계 불가.")
