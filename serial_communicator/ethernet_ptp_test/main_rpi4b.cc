@@ -33,30 +33,41 @@ int main() {
   gpioWrite(GPIO_PIN, 0);
 
   auto program_start_time = std::chrono::system_clock::now();
+  auto future_time = program_start_time + std::chrono::seconds(3);
+  auto future_time_t = std::chrono::system_clock::to_time_t(future_time);
+  auto future_reference = std::chrono::system_clock::from_time_t(future_time_t);
+  auto future_time_1 = future_reference + std::chrono::milliseconds(100);
+  auto future_time_2 = future_reference + std::chrono::milliseconds(200);
+  auto future_time_3 = future_reference + std::chrono::milliseconds(300);
+  auto future_time_4 = future_reference + std::chrono::milliseconds(400);
 
-  auto future_time_1 = program_start_time + std::chrono::seconds(2);
-  auto future_time_2 = program_start_time + std::chrono::seconds(4);
-  auto future_time_3 = program_start_time + std::chrono::seconds(6);
-  auto future_time_4 = program_start_time + std::chrono::seconds(8);
+  std::cout << " Future time set at: "
+            << std::put_time(std::localtime(&future_time_t), "%H:%M:%S")
+            << std::endl;
+
   ScheduledExecutor scheduler1(timer_manager);
   scheduler1.ScheduleAt(future_time_1, [&]() {
     gpioWrite(GPIO_PIN, 1);
     gpioWrite(GPIO_PIN, 0);
+    // PrintTime("ScheduledExecutor: Execute at absolute time 1.");
   });
   ScheduledExecutor scheduler2(timer_manager);
   scheduler2.ScheduleAt(future_time_2, [&]() {
     gpioWrite(GPIO_PIN, 1);
     gpioWrite(GPIO_PIN, 0);
+    // PrintTime("ScheduledExecutor: Execute at absolute time 2.");
   });
   ScheduledExecutor scheduler3(timer_manager);
   scheduler3.ScheduleAt(future_time_3, [&]() {
     gpioWrite(GPIO_PIN, 1);
     gpioWrite(GPIO_PIN, 0);
+    // PrintTime("ScheduledExecutor: Execute at absolute time 3.");
   });
   ScheduledExecutor scheduler4(timer_manager);
   scheduler4.ScheduleAt(future_time_4, [&]() {
     gpioWrite(GPIO_PIN, 1);
     gpioWrite(GPIO_PIN, 0);
+    // PrintTime("ScheduledExecutor: Execute at absolute time 4.");
   });
 
   // 프로그램 실행

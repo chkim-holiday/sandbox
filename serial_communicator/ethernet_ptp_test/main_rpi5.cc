@@ -35,6 +35,9 @@ int main() {
   auto future_time_2 = future_reference + std::chrono::milliseconds(200);
   auto future_time_3 = future_reference + std::chrono::milliseconds(300);
   auto future_time_4 = future_reference + std::chrono::milliseconds(400);
+  std::cout << " Future time set at: "
+            << std::put_time(std::localtime(&future_time_t), "%H:%M:%S")
+            << std::endl;
 
   ScheduledExecutor scheduler1(timer_manager);
   scheduler1.ScheduleAt(future_time_1, [&]() {

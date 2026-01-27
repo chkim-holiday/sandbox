@@ -15,20 +15,22 @@ add_executable(trigger_test main_trigger.cc )
 target_link_libraries(trigger_test PRIVATE Threads::Threads)
 install(TARGETS trigger_test DESTINATION bin)
 
-
-add_executable(
-  test_rpi5 main_rpi5.cc)
-target_link_libraries(test_rpi5 PRIVATE Threads::Threads lgpio)
-install(TARGETS test_rpi5 DESTINATION bin)
-
 # For Raspberry PI only
 if(NOT EXISTS "/usr/include/pigpio.h")
   message(WARNING "pigpio.h not found. Skip RPibuild target.")
   return()
 endif()
 add_executable(
-  serial_comm_improved_rpi4b main_improved_rpi4b.cc crc8_table.h
-                             packet_serializer.h serial_communicator.h)
-target_link_libraries(serial_comm_improved_rpi4b PRIVATE Threads::Threads
-                                                         pigpio crc8_lib)
-install(TARGETS serial_comm_improved_rpi4b DESTINATION bin)
+  test_rpi4 main_rpi4b.cc)
+target_link_libraries(test_rpi4 PRIVATE Threads::Threads pigpio)
+install(TARGETS test_rpi4 DESTINATION bin)
+
+# For Raspberry PI only
+if(NOT EXISTS "/usr/include/lgpio.h")
+  message(WARNING "lgpio.h not found. Skip RPibuild target.")
+  return()
+endif()
+add_executable(
+  test_rpi5 main_rpi5.cc)
+target_link_libraries(test_rpi5 PRIVATE Threads::Threads lgpio)
+install(TARGETS test_rpi5 DESTINATION bin)
