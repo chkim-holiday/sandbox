@@ -73,9 +73,8 @@ int main() {
   // 프로그램 실행
   std::cout << "\nActive timers: " << timer_manager.ActiveTimerCount()
             << std::endl;
-  std::this_thread::sleep_for(std::chrono::seconds(10));
+  std::this_thread::sleep_for(std::chrono::seconds(4));
   PrintTime("Program ending");
-
   gpioWrite(GPIO_PIN, 0);
   gpioTerminate();
 
