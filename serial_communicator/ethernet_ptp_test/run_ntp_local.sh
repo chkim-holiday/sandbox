@@ -1,13 +1,6 @@
 #!/bin/bash
-IFACE=${1:-eth0}  # 인자가 없으면 기본값 eth0
-NTP_CONFIG=${2}
-
+NTP_CONFIG=${1}
 if [ -z "$1" ]; then
-    echo "Error: Need interface name as argument."
-    echo "Usage: $0 <interface name>"
-    exit 1
-fi
-if [ -z "$2" ]; then
     echo "Error: Need NTP config file as argument."
     echo "Usage: $0 <interface name> <ntp config file>"
     exit 1
