@@ -15,6 +15,12 @@ add_executable(trigger_test main_trigger.cc )
 target_link_libraries(trigger_test PRIVATE Threads::Threads)
 install(TARGETS trigger_test DESTINATION bin)
 
+
+add_executable(
+  test_rpi5 main_rpi5.cc)
+target_link_libraries(test_rpi5 PRIVATE Threads::Threads lgpio)
+install(TARGETS test_rpi5 DESTINATION bin)
+
 # For Raspberry PI only
 if(NOT EXISTS "/usr/include/pigpio.h")
   message(WARNING "pigpio.h not found. Skip RPibuild target.")
